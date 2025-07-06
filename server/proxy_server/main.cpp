@@ -8,18 +8,6 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-
-#include <limits>
-
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
-#include <boost/asio/signal_set.hpp>
-
-#include <boost/algorithm/string/join.hpp>
-#include <boost/program_options.hpp>
-namespace po = boost::program_options;
-
 #include "proxy/proxy_server.hpp"
 #include "proxy/socks_client.hpp"
 #include "proxy/logging.hpp"
@@ -45,6 +33,18 @@ namespace po = boost::program_options;
 #endif
 
 #include "main.hpp"
+
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/signal_set.hpp>
+
+#include <boost/algorithm/string/join.hpp>
+#include <boost/program_options.hpp>
+namespace po = boost::program_options;
+
+#include <limits>
+
 
 namespace net = boost::asio;
 using namespace proxy;
@@ -305,7 +305,7 @@ namespace std
 	}
 }
 
-int main(int argc, char** argv)
+int main1(int argc, char** argv)
 {
 	platform_init();
 
@@ -442,3 +442,92 @@ and/or open issues at https://github.com/Jackarain/proxy)"
 
 	return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
+
+using namespace boost;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::co_spawn;
+using boost::asio::detached;
+using boost::asio::use_awaitable;
+namespace this_coro = boost::asio::this_coro;
+
+awaitable<void> echo(tcp::socket socket)
+{
+	try
+	{
+		char data[1024];
+		for (;;)
+		{
+			std::size_t n = co_await socket.async_read_some(asio::buffer(data), use_awaitable);
+			co_await async_write(socket, asio::buffer(data, n), use_awaitable);
+		}
+	}
+	catch (std::exception& e)
+	{
+		std::printf("echo Exception: %s\n", e.what());
+	}
+}
+
+
+
+static awaitable<void> initiate()
+{
+	printf("static ucoro::awaitable<void> initiate()\n");
+	co_return;
+}
+
+auto async_initiate() -> decltype(initiate())
+{
+	return initiate();
+}
+
+awaitable<void> listener()
+{
+	co_await async_initiate();
+
+	co_return;
+/*
+	auto executor = co_await this_coro::executor;
+	tcp::acceptor acceptor(executor, { tcp::v4(), 55555 });
+	for (;;)
+	{
+		tcp::socket socket = co_await acceptor.async_accept(use_awaitable);
+		auto executor = co_await this_coro::executor;
+		co_spawn(executor, echo(std::move(socket)), detached);
+	}
+*/
+}
+
+int main()
+{
+	try
+	{
+		asio::io_context io_context(1);
+
+		asio::signal_set signals(io_context, SIGINT, SIGTERM);
+		signals.async_wait([&](auto, auto) { io_context.stop(); });
+
+		co_spawn(io_context, listener(), detached);
+
+		io_context.run();
+	}
+	catch (std::exception& e)
+	{
+		std::printf("Exception: %s\n", e.what());
+	}
+}
+
+
+
+
+
